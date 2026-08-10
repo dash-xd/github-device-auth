@@ -1,4 +1,4 @@
-package deviceflow
+package ghdeviceflow
 
 import (
 	"context"
