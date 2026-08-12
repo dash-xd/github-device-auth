@@ -17,16 +17,19 @@ type refreshRequest struct {
 
 func handleRefresh(w http.ResponseWriter, r *http.Request) {
 	clientID := os.Getenv("GITHUB_CLIENT_ID")
-	clientSecret := os.Getenv("GITHUB_CLIENT_SECRET")
 
-	if clientID == "" || clientSecret == "" {
+	if clientID == "" {
 		http.Error(
 			w,
-			"GitHub client credentials are not configured",
+			"GitHub client ID is not configured",
 			http.StatusInternalServerError,
 		)
 		return
 	}
+
+	// GITHUB_CLIENT_SECRET is optional: refresh tokens issued via the
+	// device flow belong to a public client and refresh without one.
+	clientSecret := os.Getenv("GITHUB_CLIENT_SECRET")
 
 	var request refreshRequest
 
@@ -66,6 +69,13 @@ func handleRefresh(w http.ResponseWriter, r *http.Request) {
 			http.Error(
 				w,
 				"GitHub refresh token is invalid or expired",
+				http.StatusUnauthorized,
+			)
+
+		case errors.Is(err, ghdeviceflow.ErrIncorrectClientCredentials):
+			http.Error(
+				w,
+				"GitHub refresh token requires client credentials this request did not provide",
 				http.StatusUnauthorized,
 			)
 

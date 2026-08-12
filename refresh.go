@@ -13,12 +13,16 @@ import (
 const refreshGrantType = "refresh_token"
 
 var ErrInvalidRefreshToken = errors.New("refresh token is invalid or expired")
+var ErrIncorrectClientCredentials = errors.New("github rejected the client credentials for this refresh token")
 
 // RefreshAccessToken exchanges a refresh token for a new access token.
 //
-// Unlike the device flow, this grant requires the app's client secret,
-// since only confidential clients (GitHub Apps with "Expire user access
-// tokens" enabled) issue refresh tokens.
+// clientSecret is optional: a refresh token issued via the device flow
+// belongs to a public client and refreshes without one. Pass an empty
+// string for those. Confidential clients (traditional OAuth Apps, or
+// GitHub Apps that issued the refresh token some other way) still require
+// their client secret; if one is required but missing or wrong, GitHub
+// reports it as ErrIncorrectClientCredentials rather than succeeding.
 func RefreshAccessToken(
 	ctx context.Context,
 	clientID string,
@@ -27,9 +31,12 @@ func RefreshAccessToken(
 ) (*TokenResponse, error) {
 	form := url.Values{}
 	form.Set("client_id", clientID)
-	form.Set("client_secret", clientSecret)
 	form.Set("grant_type", refreshGrantType)
 	form.Set("refresh_token", refreshToken)
+
+	if clientSecret != "" {
+		form.Set("client_secret", clientSecret)
+	}
 
 	req, err := http.NewRequestWithContext(
 		ctx,
@@ -69,6 +76,9 @@ func RefreshAccessToken(
 
 	case "bad_refresh_token":
 		return nil, ErrInvalidRefreshToken
+
+	case "incorrect_client_credentials":
+		return nil, ErrIncorrectClientCredentials
 
 	default:
 		return nil, fmt.Errorf(
