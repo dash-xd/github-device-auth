@@ -1,0 +1,4 @@
+github.com/dash-xd/github-device-auth v0.0.0-20260812043759-c7f083cc5ad9 h1:t1nL7tUu8qWe5L7yHo2z5MvmBOSh+SCqJk12/sc9Phw=
+github.com/dash-xd/github-device-auth v0.0.0-20260812043759-c7f083cc5ad9/go.mod h1:wNsxPiLUTaKOwWK3GLop5n3WfXxoj3YcikzBkhAMxnc=
+github.com/go-chi/chi/v5 v5.3.1 h1:3j4HZLGZQ3JpMCrPJF/Jl3mYJfWLKBfNJ6quurUGCf8=
+github.com/go-chi/chi/v5 v5.3.1/go.mod h1:R+tYY2hNuVUUjxoPtqUdgBqevM9s9njzkTLutVsOCto=
