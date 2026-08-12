@@ -1,4 +1,4 @@
-package function
+package router
 
 import (
 	"context"
@@ -11,11 +11,11 @@ import (
 	ghdeviceflow "github.com/dash-xd/github-device-auth"
 )
 
-type refreshRequest struct {
-	RefreshToken string `json:"refresh_token"`
+type pollRequest struct {
+	DeviceCode string `json:"device_code"`
 }
 
-func handleRefresh(w http.ResponseWriter, r *http.Request) {
+func handlePoll(w http.ResponseWriter, r *http.Request) {
 	clientID := os.Getenv("GITHUB_CLIENT_ID")
 
 	if clientID == "" {
@@ -27,11 +27,7 @@ func handleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// GITHUB_CLIENT_SECRET is optional: refresh tokens issued via the
-	// device flow belong to a public client and refresh without one.
-	clientSecret := os.Getenv("GITHUB_CLIENT_SECRET")
-
-	var request refreshRequest
+	var request pollRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		http.Error(
@@ -42,47 +38,56 @@ func handleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if request.RefreshToken == "" {
+	if request.DeviceCode == "" {
 		http.Error(
 			w,
-			"refresh_token is required",
+			"device_code is required",
 			http.StatusBadRequest,
 		)
 		return
 	}
 
+	/*
+		The device flow normally expires after 900 seconds.
+
+		Use a server-side timeout so a function invocation can never
+		poll indefinitely.
+
+		The deployed Cloud Function should have a timeout greater than
+		this value.
+	*/
 	ctx, cancel := context.WithTimeout(
 		r.Context(),
-		15*time.Second,
+		14*time.Minute,
 	)
 	defer cancel()
 
-	token, err := ghdeviceflow.RefreshAccessToken(
+	token, err := ghdeviceflow.PollForToken(
 		ctx,
 		clientID,
-		clientSecret,
-		request.RefreshToken,
+		request.DeviceCode,
+		5*time.Second,
 	)
 	if err != nil {
 		switch {
-		case errors.Is(err, ghdeviceflow.ErrInvalidRefreshToken):
+		case errors.Is(err, ghdeviceflow.ErrExpiredToken):
 			http.Error(
 				w,
-				"GitHub refresh token is invalid or expired",
-				http.StatusUnauthorized,
+				"GitHub device code expired",
+				http.StatusGone,
 			)
 
-		case errors.Is(err, ghdeviceflow.ErrIncorrectClientCredentials):
+		case errors.Is(err, ghdeviceflow.ErrAccessDenied):
 			http.Error(
 				w,
-				"GitHub refresh token requires client credentials this request did not provide",
-				http.StatusUnauthorized,
+				"GitHub authorization was denied",
+				http.StatusForbidden,
 			)
 
 		case errors.Is(err, context.DeadlineExceeded):
 			http.Error(
 				w,
-				"GitHub token refresh timed out",
+				"GitHub authorization polling timed out",
 				http.StatusGatewayTimeout,
 			)
 
@@ -96,7 +101,7 @@ func handleRefresh(w http.ResponseWriter, r *http.Request) {
 		default:
 			http.Error(
 				w,
-				"GitHub token refresh failed",
+				"GitHub authentication failed",
 				http.StatusBadGateway,
 			)
 		}
