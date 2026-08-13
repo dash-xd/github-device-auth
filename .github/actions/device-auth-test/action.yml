@@ -1,0 +1,87 @@
+name: 'GitHub Device Auth Test'
+description: >-
+  Exercises the github-device-auth Cloud Run service: the device flow, the
+  refresh flow, or both. Wraps scripts/test-device-auth.sh so other
+  workflows/actions in this repo (or in repos that reference this action
+  directly) can reuse a single flow, e.g. just 'refresh', without having to
+  reimplement the curl/gcloud calls.
+
+  The runner must already be authenticated to gcloud with access to
+  describe the Cloud Run service and mint identity tokens for it (for
+  example via google-github-actions/auth run before this action).
+inputs:
+  command:
+    description: >-
+      Which flow to run: 'device' (request + poll), 'refresh' (exchange a
+      refresh token), or 'full' (device, then refresh).
+    required: false
+    default: 'refresh'
+  project-id:
+    description: 'GCP project ID. Defaults to the active gcloud config project.'
+    required: false
+    default: ''
+  service-name:
+    description: 'Cloud Run service name.'
+    required: false
+    default: 'github-device-auth-router'
+  region:
+    description: 'GCP region the Cloud Run service is deployed in.'
+    required: false
+    default: 'us-central1'
+  refresh-token:
+    description: >-
+      Refresh token to use for the 'refresh' command. Falls back to the
+      GITHUB_REFRESH_TOKEN environment variable if already set on the job.
+    required: false
+    default: ''
+  non-interactive:
+    description: >-
+      Skip the "press enter to continue" prompt during the device flow and
+      start polling immediately. Set to 'false' only for a manually
+      attended run; unattended CI runs should leave this 'true'.
+    required: false
+    default: 'true'
+  show-tokens:
+    description: >-
+      Print raw token values to the step's stdout instead of just
+      "yes"/"no". Step outputs are masked either way; this only affects
+      the log. Leave 'false' unless you specifically need it for debugging.
+    required: false
+    default: 'false'
+outputs:
+  access-token:
+    description: 'The GitHub access token returned by the flow.'
+    value: ${{ steps.run.outputs.access-token }}
+  refresh-token:
+    description: 'The GitHub refresh token returned by the flow (rotated on every refresh).'
+    value: ${{ steps.run.outputs.refresh-token }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Run device-auth test script
+      id: run
+      shell: bash
+      env:
+        GITHUB_REFRESH_TOKEN: ${{ inputs.refresh-token }}
+      run: |
+        set -euo pipefail
+
+        args=(
+          "${{ inputs.command }}"
+          --service-name "${{ inputs.service-name }}"
+          --region "${{ inputs.region }}"
+        )
+
+        if [[ -n "${{ inputs.project-id }}" ]]; then
+          args+=(--project-id "${{ inputs.project-id }}")
+        fi
+
+        if [[ "${{ inputs.non-interactive }}" == "true" ]]; then
+          args+=(--non-interactive)
+        fi
+
+        if [[ "${{ inputs.show-tokens }}" == "true" ]]; then
+          args+=(--show-tokens)
+        fi
+
+        "${{ github.action_path }}/../../../scripts/test-device-auth.sh" "${args[@]}"
