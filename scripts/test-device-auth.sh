@@ -18,6 +18,7 @@ REGION="us-central1"
 REFRESH_TOKEN_INPUT=""
 NON_INTERACTIVE=false
 SHOW_TOKENS=false
+IMPERSONATE_SERVICE_ACCOUNT="${IDENTITY_TOKEN_IMPERSONATE_SERVICE_ACCOUNT:-}"
 
 ACCESS_TOKEN=""
 REFRESH_TOKEN=""
@@ -54,6 +55,14 @@ Options:
   --region <region>       GCP region of the Cloud Run service. (default: $REGION)
   --refresh-token <tok>   Refresh token for the 'refresh' command.
                            (default: \$GITHUB_REFRESH_TOKEN)
+  --impersonate-service-account <email>
+                           Pass --impersonate-service-account to every
+                           `gcloud auth print-identity-token` call. Needed
+                           when the active credential is Workload Identity
+                           Federation (gcloud rejects --audiences outright
+                           on that credential type otherwise), not needed
+                           for a plain service-account-keyed login.
+                           (default: \$IDENTITY_TOKEN_IMPERSONATE_SERVICE_ACCOUNT)
   --non-interactive       Skip the "press enter to continue" prompt during
                            the device flow and start polling immediately.
   --show-tokens           Print the actual token values at the end instead
@@ -65,6 +74,7 @@ Examples:
   $SCRIPT_NAME device --project-id my-proj
   $SCRIPT_NAME refresh --refresh-token ghr_xxx
   GITHUB_REFRESH_TOKEN=ghr_xxx $SCRIPT_NAME refresh --service-name my-router
+  $SCRIPT_NAME refresh --impersonate-service-account terraform@my-proj.iam.gserviceaccount.com
 EOF
 }
 
@@ -110,6 +120,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --refresh-token)
             REFRESH_TOKEN_INPUT="${2:?--refresh-token requires a value}"
+            shift 2
+            ;;
+        --impersonate-service-account)
+            IMPERSONATE_SERVICE_ACCOUNT="${2:?--impersonate-service-account requires a value}"
             shift 2
             ;;
         --non-interactive)
@@ -185,7 +199,13 @@ echo
 
 get_identity_token() {
     local token
-    if ! token="$(gcloud auth print-identity-token --audiences="$SERVICE_URL" 2>&1)"; then
+    local impersonate_args=()
+
+    if [[ -n "$IMPERSONATE_SERVICE_ACCOUNT" ]]; then
+        impersonate_args=(--impersonate-service-account="$IMPERSONATE_SERVICE_ACCOUNT")
+    fi
+
+    if ! token="$(gcloud auth print-identity-token "${impersonate_args[@]}" --audiences="$SERVICE_URL" 2>&1)"; then
         log_error "Failed to obtain an identity token for audience ${SERVICE_URL}:"
         log_error "$token"
         return 1

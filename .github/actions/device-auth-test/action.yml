@@ -34,6 +34,17 @@ inputs:
       GITHUB_REFRESH_TOKEN environment variable if already set on the job.
     required: false
     default: ''
+  impersonate-service-account:
+    description: >-
+      Service account email to pass as --impersonate-service-account on
+      every `gcloud auth print-identity-token` call. Required when the
+      runner authenticated via Workload Identity Federation (gcloud
+      rejects the --audiences flag outright on that credential type
+      without it, even though `gcloud auth list` already shows the
+      impersonated service account as active) - leave empty for a plain
+      service-account-keyed login, which doesn't need it.
+    required: false
+    default: ''
   non-interactive:
     description: >-
       Skip the "press enter to continue" prompt during the device flow and
@@ -63,6 +74,7 @@ runs:
       shell: bash
       env:
         GITHUB_REFRESH_TOKEN: ${{ inputs.refresh-token }}
+        IDENTITY_TOKEN_IMPERSONATE_SERVICE_ACCOUNT: ${{ inputs.impersonate-service-account }}
       run: |
         set -euo pipefail
 
@@ -74,6 +86,10 @@ runs:
 
         if [[ -n "${{ inputs.project-id }}" ]]; then
           args+=(--project-id "${{ inputs.project-id }}")
+        fi
+
+        if [[ -n "${{ inputs.impersonate-service-account }}" ]]; then
+          args+=(--impersonate-service-account "${{ inputs.impersonate-service-account }}")
         fi
 
         if [[ "${{ inputs.non-interactive }}" == "true" ]]; then
