@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 #
-# Exercises the GitHub device-flow Cloud Run service end to end:
-#   device   Request a device code and poll until the user authorizes it.
-#   refresh  Exchange a refresh token for a new access/refresh token pair.
-#   full     Run device, then immediately feed its refresh token into refresh.
+# Exercises the GitHub device-auth Cloud Run service's single 'auth'
+# command, which does one of two things:
+#   - No --refresh-token given: start a new device flow (request a device
+#     code, poll until the user authorizes it) and print the resulting
+#     access/refresh token.
+#   - --refresh-token given (or $GITHUB_REFRESH_TOKEN set): skip the device
+#     flow and exchange that refresh token for a new access/refresh token.
 #
 # Every HTTP call logs its status code and, on failure, the response body,
 # so a 4xx/5xx from the service is never silently swallowed.
@@ -39,21 +42,27 @@ log_error() { log "ERROR" "$@"; }
 
 usage() {
     cat <<EOF
-Usage: $SCRIPT_NAME <command> [options]
+Usage: $SCRIPT_NAME auth [options]
 
-Commands:
-  device      Request a device code and poll until authorized. Prints
-              access_token/refresh_token status (device, then poll).
-  refresh     Exchange a refresh token for a new access/refresh token pair.
-  full        Run 'device', then immediately run 'refresh' with the
-              resulting refresh token.
+'auth' either starts a new device authorization (default) or refreshes an
+existing one, depending on whether a refresh token is provided:
+
+  $SCRIPT_NAME auth
+      Start a new device flow: request a device code, poll until
+      authorized, print the resulting access/refresh token.
+
+  $SCRIPT_NAME auth --refresh-token <tok>
+      Skip the device flow and exchange <tok> for a new access/refresh
+      token pair.
 
 Options:
   --project-id <id>       GCP project ID.
                            (default: \`gcloud config get-value project\`)
   --service-name <name>   Cloud Run service name. (default: $SERVICE_NAME)
   --region <region>       GCP region of the Cloud Run service. (default: $REGION)
-  --refresh-token <tok>   Refresh token for the 'refresh' command.
+  --refresh-token <tok>   Refresh token to exchange. If given (or if
+                           \$GITHUB_REFRESH_TOKEN is set), runs the refresh
+                           flow instead of starting a new device flow.
                            (default: \$GITHUB_REFRESH_TOKEN)
   --impersonate-service-account <email>
                            Pass --impersonate-service-account to every
@@ -71,10 +80,10 @@ Options:
   -h, --help              Show this help text.
 
 Examples:
-  $SCRIPT_NAME device --project-id my-proj
-  $SCRIPT_NAME refresh --refresh-token ghr_xxx
-  GITHUB_REFRESH_TOKEN=ghr_xxx $SCRIPT_NAME refresh --service-name my-router
-  $SCRIPT_NAME refresh --impersonate-service-account terraform@my-proj.iam.gserviceaccount.com
+  $SCRIPT_NAME auth --project-id my-proj
+  $SCRIPT_NAME auth --refresh-token ghr_xxx
+  GITHUB_REFRESH_TOKEN=ghr_xxx $SCRIPT_NAME auth --service-name my-router
+  $SCRIPT_NAME auth --impersonate-service-account terraform@my-proj.iam.gserviceaccount.com
 EOF
 }
 
@@ -91,7 +100,7 @@ COMMAND="$1"
 shift
 
 case "$COMMAND" in
-    device|refresh|full)
+    auth)
         ;;
     -h|--help)
         usage
@@ -374,18 +383,7 @@ device_flow() {
 }
 
 refresh_flow() {
-    local token_to_use="${REFRESH_TOKEN:-}"
-
-    if [[ -z "$token_to_use" ]]; then
-        token_to_use="${REFRESH_TOKEN_INPUT:-${GITHUB_REFRESH_TOKEN:-}}"
-    fi
-
-    if [[ -z "$token_to_use" ]]; then
-        log_error "No refresh token available."
-        log_error "Either run '$SCRIPT_NAME full' (or 'device' first), or pass"
-        log_error "--refresh-token, or set \$GITHUB_REFRESH_TOKEN."
-        exit 1
-    fi
+    local token_to_use="$1"
 
     log_info "Refreshing GitHub access token..."
     echo
@@ -435,17 +433,12 @@ refresh_flow() {
 # Dispatch
 # ---------------------------------------------------------------------------
 
-case "$COMMAND" in
-    device)
-        device_flow
-        ;;
-    refresh)
-        refresh_flow
-        ;;
-    full)
-        device_flow
-        refresh_flow
-        ;;
-esac
+REFRESH_TOKEN_TO_USE="${REFRESH_TOKEN_INPUT:-${GITHUB_REFRESH_TOKEN:-}}"
+
+if [[ -n "$REFRESH_TOKEN_TO_USE" ]]; then
+    refresh_flow "$REFRESH_TOKEN_TO_USE"
+else
+    device_flow
+fi
 
 log_info "Done."

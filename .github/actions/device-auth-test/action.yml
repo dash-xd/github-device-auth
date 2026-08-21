@@ -1,21 +1,16 @@
 name: 'GitHub Device Auth Test'
 description: >-
-  Exercises the github-device-auth Cloud Run service: the device flow, the
-  refresh flow, or both. Wraps scripts/test-device-auth.sh so other
-  workflows/actions in this repo (or in repos that reference this action
-  directly) can reuse a single flow, e.g. just 'refresh', without having to
-  reimplement the curl/gcloud calls.
+  Runs scripts/test-device-auth.sh's 'auth' command against the
+  github-device-auth Cloud Run service, so other workflows/actions in this
+  repo (or in repos that reference this action directly) can reuse it
+  without reimplementing the curl/gcloud calls. With no refresh-token
+  input, starts a new device flow; with one, exchanges it for a new
+  access/refresh token instead.
 
   The runner must already be authenticated to gcloud with access to
   describe the Cloud Run service and mint identity tokens for it (for
   example via google-github-actions/auth run before this action).
 inputs:
-  command:
-    description: >-
-      Which flow to run: 'device' (request + poll), 'refresh' (exchange a
-      refresh token), or 'full' (device, then refresh).
-    required: false
-    default: 'refresh'
   project-id:
     description: 'GCP project ID. Defaults to the active gcloud config project.'
     required: false
@@ -30,8 +25,9 @@ inputs:
     default: 'us-central1'
   refresh-token:
     description: >-
-      Refresh token to use for the 'refresh' command. Falls back to the
-      GITHUB_REFRESH_TOKEN environment variable if already set on the job.
+      Refresh token to exchange. If set (or if the GITHUB_REFRESH_TOKEN
+      environment variable is already set on the job), runs the refresh
+      flow instead of starting a new device flow.
     required: false
     default: ''
   impersonate-service-account:
@@ -79,7 +75,7 @@ runs:
         set -euo pipefail
 
         args=(
-          "${{ inputs.command }}"
+          auth
           --service-name "${{ inputs.service-name }}"
           --region "${{ inputs.region }}"
         )
