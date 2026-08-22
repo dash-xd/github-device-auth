@@ -12,9 +12,6 @@ import (
 
 const refreshGrantType = "refresh_token"
 
-var ErrInvalidRefreshToken = errors.New("refresh token is invalid or expired")
-var ErrIncorrectClientCredentials = errors.New("github rejected the client credentials for this refresh token")
-
 // RefreshAccessToken exchanges a refresh token for a new access token.
 //
 // clientSecret is optional: a refresh token issued via the device flow
