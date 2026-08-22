@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/dash-xd/github-device-auth/internal/ghdeviceflow"
+	"github.com/dash-xd/github-device-auth/internal/tokencache"
 )
 
 type refreshRequest struct {
@@ -48,6 +49,15 @@ func handleRefresh(w http.ResponseWriter, r *http.Request) {
 			"refresh_token is required",
 			http.StatusBadRequest,
 		)
+		return
+	}
+
+	// Validated before calling GitHub: a device-flow refresh token is
+	// single-use and rotates on every exchange, so a cache misconfiguration
+	// caught only after the exchange would mean the old refresh token is
+	// already burned and the newly issued one has nowhere to go.
+	bucket, cacheKey, cacheRequested, ok := parseCacheRequest(w, r)
+	if !ok {
 		return
 	}
 
@@ -101,6 +111,28 @@ func handleRefresh(w http.ResponseWriter, r *http.Request) {
 			)
 		}
 
+		return
+	}
+
+	if cacheRequested {
+		if err := tokencache.Store(ctx, bucket, cacheKey, token); err != nil {
+			http.Error(
+				w,
+				"failed to cache GitHub token",
+				http.StatusBadGateway,
+			)
+			return
+		}
+
+		writeJSON(
+			w,
+			http.StatusOK,
+			cacheConfirmation{
+				Cached: true,
+				Bucket: bucket,
+				Object: cacheKey,
+			},
+		)
 		return
 	}
 

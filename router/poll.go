@@ -69,43 +69,8 @@ func handlePoll(w http.ResponseWriter, r *http.Request) {
 		5*time.Second,
 	)
 	if err != nil {
-		switch {
-		case errors.Is(err, ghdeviceflow.ErrExpiredToken):
-			http.Error(
-				w,
-				"GitHub device code expired",
-				http.StatusGone,
-			)
-
-		case errors.Is(err, ghdeviceflow.ErrAccessDenied):
-			http.Error(
-				w,
-				"GitHub authorization was denied",
-				http.StatusForbidden,
-			)
-
-		case errors.Is(err, context.DeadlineExceeded):
-			http.Error(
-				w,
-				"GitHub authorization polling timed out",
-				http.StatusGatewayTimeout,
-			)
-
-		case errors.Is(err, context.Canceled):
-			http.Error(
-				w,
-				"request canceled",
-				http.StatusRequestTimeout,
-			)
-
-		default:
-			http.Error(
-				w,
-				"GitHub authentication failed",
-				http.StatusBadGateway,
-			)
-		}
-
+		status, message := pollErrorResponse(err)
+		http.Error(w, message, status)
 		return
 	}
 
@@ -114,4 +79,27 @@ func handlePoll(w http.ResponseWriter, r *http.Request) {
 		http.StatusOK,
 		token,
 	)
+}
+
+// pollErrorResponse maps a PollForToken error to the HTTP status and
+// message it should produce. Shared with handleDeviceFull, which can
+// only use the message half - its response's status is already 200 by
+// the time polling can fail, since it's mid-SSE-stream.
+func pollErrorResponse(err error) (status int, message string) {
+	switch {
+	case errors.Is(err, ghdeviceflow.ErrExpiredToken):
+		return http.StatusGone, "GitHub device code expired"
+
+	case errors.Is(err, ghdeviceflow.ErrAccessDenied):
+		return http.StatusForbidden, "GitHub authorization was denied"
+
+	case errors.Is(err, context.DeadlineExceeded):
+		return http.StatusGatewayTimeout, "GitHub authorization polling timed out"
+
+	case errors.Is(err, context.Canceled):
+		return http.StatusRequestTimeout, "request canceled"
+
+	default:
+		return http.StatusBadGateway, "GitHub authentication failed"
+	}
 }

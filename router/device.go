@@ -22,6 +22,20 @@ type deviceResponse struct {
 }
 
 func handleDevice(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Has("full") {
+		handleDeviceFull(w, r)
+		return
+	}
+
+	if r.URL.Query().Has("cache") {
+		http.Error(
+			w,
+			"cache is only supported together with full on this endpoint",
+			http.StatusBadRequest,
+		)
+		return
+	}
+
 	clientID := os.Getenv("GITHUB_CLIENT_ID")
 
 	if clientID == "" {
@@ -52,7 +66,15 @@ func handleDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response := deviceResponse{
+	writeJSON(
+		w,
+		http.StatusOK,
+		newDeviceResponse(device),
+	)
+}
+
+func newDeviceResponse(device *ghdeviceflow.DeviceCodeResponse) deviceResponse {
+	return deviceResponse{
 		DeviceCode:              device.DeviceCode,
 		UserCode:                device.UserCode,
 		VerificationURI:         device.VerificationURI,
@@ -64,10 +86,4 @@ func handleDevice(w http.ResponseWriter, r *http.Request) {
 			" and enter the code " +
 			device.UserCode,
 	}
-
-	writeJSON(
-		w,
-		http.StatusOK,
-		response,
-	)
 }

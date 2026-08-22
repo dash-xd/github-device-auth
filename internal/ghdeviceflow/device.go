@@ -10,7 +10,10 @@ import (
 	"strings"
 )
 
-const deviceCodeURL = "https://github.com/login/device/code"
+// DeviceCodeURL is GitHub's device code endpoint. It's a var, not a
+// const, so tests in this module can point it at a fake server; nothing
+// in production code ever reassigns it.
+var DeviceCodeURL = "https://github.com/login/device/code"
 
 // DeviceCodeResponse is GitHub's response to a device code request.
 type DeviceCodeResponse struct {
@@ -32,7 +35,7 @@ func RequestDeviceCode(
 	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodPost,
-		deviceCodeURL,
+		DeviceCodeURL,
 		strings.NewReader(form.Encode()),
 	)
 	if err != nil {
