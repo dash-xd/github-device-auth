@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	ghdeviceflow "github.com/dash-xd/github-device-auth"
+	"github.com/dash-xd/github-device-auth/internal/ghdeviceflow"
 )
 
 type deviceResponse struct {
