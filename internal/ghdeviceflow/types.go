@@ -5,7 +5,11 @@ package ghdeviceflow
 
 import "errors"
 
-const tokenURL = "https://github.com/login/oauth/access_token"
+// TokenURL is GitHub's token endpoint, used for both the device-flow
+// poll and the refresh-token exchange. It's a var, not a const, so
+// tests in this module can point it at a fake server; nothing in
+// production code ever reassigns it.
+var TokenURL = "https://github.com/login/oauth/access_token"
 
 // TokenResponse is GitHub's response shape for both the device-flow poll
 // and the refresh-token exchange.

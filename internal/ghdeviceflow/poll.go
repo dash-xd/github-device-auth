@@ -97,7 +97,7 @@ func requestToken(
 	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodPost,
-		tokenURL,
+		TokenURL,
 		strings.NewReader(form.Encode()),
 	)
 	if err != nil {
