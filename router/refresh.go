@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/dash-xd/github-device-auth/internal/ghdeviceflow"
-	"github.com/dash-xd/github-device-auth/internal/tokencache"
 )
 
 type refreshRequest struct {
@@ -56,7 +55,7 @@ func handleRefresh(w http.ResponseWriter, r *http.Request) {
 	// single-use and rotates on every exchange, so a cache misconfiguration
 	// caught only after the exchange would mean the old refresh token is
 	// already burned and the newly issued one has nowhere to go.
-	bucket, cacheKey, cacheRequested, ok := parseCacheRequest(w, r)
+	bucket, cacheKey, cacheRequested, ok := parseCacheRequest(w, r, clientID)
 	if !ok {
 		return
 	}
@@ -74,48 +73,13 @@ func handleRefresh(w http.ResponseWriter, r *http.Request) {
 		request.RefreshToken,
 	)
 	if err != nil {
-		switch {
-		case errors.Is(err, ghdeviceflow.ErrInvalidRefreshToken):
-			http.Error(
-				w,
-				"GitHub refresh token is invalid or expired",
-				http.StatusUnauthorized,
-			)
-
-		case errors.Is(err, ghdeviceflow.ErrIncorrectClientCredentials):
-			http.Error(
-				w,
-				"GitHub refresh token requires client credentials this request did not provide",
-				http.StatusUnauthorized,
-			)
-
-		case errors.Is(err, context.DeadlineExceeded):
-			http.Error(
-				w,
-				"GitHub token refresh timed out",
-				http.StatusGatewayTimeout,
-			)
-
-		case errors.Is(err, context.Canceled):
-			http.Error(
-				w,
-				"request canceled",
-				http.StatusRequestTimeout,
-			)
-
-		default:
-			http.Error(
-				w,
-				"GitHub token refresh failed",
-				http.StatusBadGateway,
-			)
-		}
-
+		status, message := refreshErrorResponse(err)
+		http.Error(w, message, status)
 		return
 	}
 
 	if cacheRequested {
-		if err := tokencache.Store(ctx, bucket, cacheKey, token); err != nil {
+		if err := storeCachedToken(ctx, bucket, cacheKey, newCachedToken(token, time.Now())); err != nil {
 			http.Error(
 				w,
 				"failed to cache GitHub token",
@@ -141,4 +105,26 @@ func handleRefresh(w http.ResponseWriter, r *http.Request) {
 		http.StatusOK,
 		token,
 	)
+}
+
+// refreshErrorResponse maps a RefreshAccessToken error to the HTTP
+// status and message it should produce. Shared with handleToken's
+// auto-refresh path.
+func refreshErrorResponse(err error) (status int, message string) {
+	switch {
+	case errors.Is(err, ghdeviceflow.ErrInvalidRefreshToken):
+		return http.StatusUnauthorized, "GitHub refresh token is invalid or expired"
+
+	case errors.Is(err, ghdeviceflow.ErrIncorrectClientCredentials):
+		return http.StatusUnauthorized, "GitHub refresh token requires client credentials this request did not provide"
+
+	case errors.Is(err, context.DeadlineExceeded):
+		return http.StatusGatewayTimeout, "GitHub token refresh timed out"
+
+	case errors.Is(err, context.Canceled):
+		return http.StatusRequestTimeout, "request canceled"
+
+	default:
+		return http.StatusBadGateway, "GitHub token refresh failed"
+	}
 }

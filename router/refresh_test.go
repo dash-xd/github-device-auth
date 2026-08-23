@@ -53,27 +53,13 @@ func TestHandleRefresh_PlainRequestReturnsToken(t *testing.T) {
 	}
 }
 
-func TestHandleRefresh_CacheMissingKey(t *testing.T) {
-	t.Setenv("GITHUB_CLIENT_ID", "test-client-id")
-
-	srv := httptest.NewServer(NewRouter())
-	t.Cleanup(srv.Close)
-
-	resp := postRefresh(t, srv, "/auth/github/refresh?cache", "some-token")
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
-	}
-}
-
 func TestHandleRefresh_CacheBucketNotConfigured(t *testing.T) {
 	t.Setenv("GITHUB_CLIENT_ID", "test-client-id")
 
 	srv := httptest.NewServer(NewRouter())
 	t.Cleanup(srv.Close)
 
-	resp := postRefresh(t, srv, "/auth/github/refresh?cache&cache_key=foo.json", "some-token")
+	resp := postRefresh(t, srv, "/auth/github/refresh?cache", "some-token")
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusInternalServerError {
@@ -96,7 +82,7 @@ func TestHandleRefresh_CacheWriteFailureSurfacesAsError(t *testing.T) {
 	srv := httptest.NewServer(NewRouter())
 	t.Cleanup(srv.Close)
 
-	resp := postRefresh(t, srv, "/auth/github/refresh?cache&cache_key=foo.json", "some-token")
+	resp := postRefresh(t, srv, "/auth/github/refresh?cache", "some-token")
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusBadGateway {

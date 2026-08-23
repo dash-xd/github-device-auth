@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/dash-xd/github-device-auth/internal/ghdeviceflow"
-	"github.com/dash-xd/github-device-auth/internal/tokencache"
 )
 
 // sseKeepAliveInterval is how often handleDeviceFull sends an SSE
@@ -40,7 +39,7 @@ func handleDeviceFull(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bucket, cacheKey, cacheRequested, ok := parseCacheRequest(w, r)
+	bucket, cacheKey, cacheRequested, ok := parseCacheRequest(w, r, clientID)
 	if !ok {
 		return
 	}
@@ -143,7 +142,7 @@ func writeDeviceFullOutcome(
 		return
 	}
 
-	if err := tokencache.Store(ctx, bucket, cacheKey, outcome.token); err != nil {
+	if err := storeCachedToken(ctx, bucket, cacheKey, newCachedToken(outcome.token, time.Now())); err != nil {
 		_ = writeSSEEvent(w, flusher, "error", sseError{Message: "failed to cache GitHub token"})
 		return
 	}
