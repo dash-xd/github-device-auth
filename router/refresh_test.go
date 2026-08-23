@@ -74,7 +74,8 @@ func TestHandleRefresh_CacheBucketNotConfigured(t *testing.T) {
 // in this test environment.
 func TestHandleRefresh_CacheWriteFailureSurfacesAsError(t *testing.T) {
 	t.Setenv("GITHUB_CLIENT_ID", "test-client-id")
-	t.Setenv("GITHUB_TOKEN_CACHE_BUCKET", "does-not-exist-test-bucket")
+	t.Setenv("TENANT_ID", "does-not-exist-test-tenant")
+	t.Setenv("REGION", "us-central1")
 
 	mockGitHub := startMockGitHub(t, mockGitHubConfig{})
 	useMockGitHub(t, mockGitHub)

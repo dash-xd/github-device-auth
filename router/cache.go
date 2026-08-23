@@ -3,14 +3,12 @@ package router
 import (
 	"context"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/dash-xd/github-device-auth/internal/ghdeviceflow"
+	"github.com/dash-xd/github-device-auth/internal/tenantstorage"
 	"github.com/dash-xd/github-device-auth/internal/tokencache"
 )
-
-const cacheBucketEnvVar = "GITHUB_TOKEN_CACHE_BUCKET"
 
 // accessTokenRefreshBuffer is how much validity an access token must
 // still have left to be served as-is; anything inside this window is
@@ -32,32 +30,39 @@ func cacheObjectKey(clientID string) string {
 	return clientID + "/latest.json"
 }
 
-// parseCacheRequest inspects the cache query param and the configured
-// cache bucket.
+// parseCacheRequest inspects the cache query param and resolves the
+// tenant-scoped cache bucket for this deployment.
 //
 // If cache wasn't requested, requested is false and ok is true - there's
-// nothing more to do. If cache was requested but the bucket isn't
-// configured, ok is false and an error response has already been
-// written to w; the caller must return immediately without writing
-// anything else. Otherwise requested and ok are both true, and
-// bucket/key are ready to pass to storeCachedToken.
+// nothing more to do. If cache was requested but the bucket can't be
+// resolved (TENANT_ID missing, or the runtime region can't be
+// determined - see tenantstorage), ok is false and an error response
+// has already been written to w; the caller must return immediately
+// without writing anything else. Otherwise requested and ok are both
+// true, and bucket/key are ready to pass to storeCachedToken.
 func parseCacheRequest(w http.ResponseWriter, r *http.Request, clientID string) (bucket, key string, requested, ok bool) {
 	if !r.URL.Query().Has("cache") {
 		return "", "", false, true
 	}
 
-	bucket = os.Getenv(cacheBucketEnvVar)
-
-	if bucket == "" {
+	bucket, err := resolveCacheBucket(r.Context())
+	if err != nil {
 		http.Error(
 			w,
-			"token cache bucket is not configured",
+			"token cache bucket is not configured: "+err.Error(),
 			http.StatusInternalServerError,
 		)
 		return "", "", true, false
 	}
 
 	return bucket, cacheObjectKey(clientID), true, true
+}
+
+// resolveCacheBucket derives this deployment's tenant-scoped token
+// cache bucket. There is no bucket name in configuration to read - see
+// the tenantstorage package doc for why.
+func resolveCacheBucket(ctx context.Context) (string, error) {
+	return tenantstorage.ResolveCacheBucket(ctx)
 }
 
 // cachedToken is the on-disk cache format: a GitHub token plus the

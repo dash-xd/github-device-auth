@@ -15,6 +15,8 @@ import (
 func NewRouter() *chi.Mux {
 	r := chi.NewRouter()
 
+	r.Use(corsMiddleware)
+
 	r.Post("/auth/github/device", handleDevice)
 	r.Post("/auth/github/poll", handlePoll)
 	r.Post("/auth/github/refresh", handleRefresh)
