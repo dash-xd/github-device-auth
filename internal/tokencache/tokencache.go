@@ -38,3 +38,28 @@ func Store(ctx context.Context, bucket, object string, value any) error {
 
 	return nil
 }
+
+// Load reads the object at gs://bucket/object and JSON-decodes it into
+// dest, using the same Application Default Credentials as Store. If the
+// object doesn't exist, the returned error wraps storage.ErrObjectNotExist
+// (checkable with errors.Is), so callers can distinguish "nothing cached
+// yet" from other failures.
+func Load(ctx context.Context, bucket, object string, dest any) error {
+	client, err := storage.NewClient(ctx)
+	if err != nil {
+		return fmt.Errorf("creating storage client: %w", err)
+	}
+	defer client.Close()
+
+	r, err := client.Bucket(bucket).Object(object).NewReader(ctx)
+	if err != nil {
+		return fmt.Errorf("reading object: %w", err)
+	}
+	defer r.Close()
+
+	if err := json.NewDecoder(r).Decode(dest); err != nil {
+		return fmt.Errorf("decoding cached value: %w", err)
+	}
+
+	return nil
+}

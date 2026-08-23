@@ -110,30 +110,13 @@ func TestHandleDeviceFull_ExpiredToken(t *testing.T) {
 	}
 }
 
-func TestHandleDeviceFull_CacheMissingKey(t *testing.T) {
-	t.Setenv("GITHUB_CLIENT_ID", "test-client-id")
-
-	srv := httptest.NewServer(NewRouter())
-	t.Cleanup(srv.Close)
-
-	resp, err := http.Post(srv.URL+"/auth/github/device?full&cache", "", nil)
-	if err != nil {
-		t.Fatalf("POST /auth/github/device?full&cache: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
-	}
-}
-
 func TestHandleDeviceFull_CacheBucketNotConfigured(t *testing.T) {
 	t.Setenv("GITHUB_CLIENT_ID", "test-client-id")
 
 	srv := httptest.NewServer(NewRouter())
 	t.Cleanup(srv.Close)
 
-	resp, err := http.Post(srv.URL+"/auth/github/device?full&cache&cache_key=foo.json", "", nil)
+	resp, err := http.Post(srv.URL+"/auth/github/device?full&cache", "", nil)
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
@@ -161,7 +144,7 @@ func TestHandleDeviceFull_CacheWriteFailureSurfacesAsError(t *testing.T) {
 	srv := httptest.NewServer(NewRouter())
 	t.Cleanup(srv.Close)
 
-	resp, err := http.Post(srv.URL+"/auth/github/device?full&cache&cache_key=foo.json", "", nil)
+	resp, err := http.Post(srv.URL+"/auth/github/device?full&cache", "", nil)
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
