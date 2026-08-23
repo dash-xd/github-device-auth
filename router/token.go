@@ -30,12 +30,11 @@ func handleToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bucket := os.Getenv(cacheBucketEnvVar)
-
-	if bucket == "" {
+	bucket, err := resolveCacheBucket(r.Context())
+	if err != nil {
 		http.Error(
 			w,
-			"token cache bucket is not configured",
+			"token cache bucket is not configured: "+err.Error(),
 			http.StatusInternalServerError,
 		)
 		return

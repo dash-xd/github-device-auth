@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GitHub Device Flow - Test Page</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    color-scheme: light dark;
+    --fg: #1a1a1a;
+    --bg: #ffffff;
+    --muted: #6b7280;
+    --border: #d9dce1;
+    --accent: #2563eb;
+    --ok: #15803d;
+    --err: #b91c1c;
+    --panel: #f6f7f9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fg: #e6e6e6;
+      --bg: #121212;
+      --muted: #9aa0a6;
+      --border: #333743;
+      --accent: #6ea8fe;
+      --ok: #4ade80;
+      --err: #f87171;
+      --panel: #1b1d22;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--fg);
+    background: var(--bg);
+    padding: 2rem 1rem 4rem;
+  }
+  main { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 1.35rem; margin-bottom: 0.25rem; }
+  p.lede { color: var(--muted); margin-top: 0; font-size: 0.9rem; }
+  fieldset {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.25rem 1.25rem;
+    margin: 0 0 1.25rem;
+  }
+  legend { padding: 0 0.4rem; font-weight: 600; font-size: 0.85rem; color: var(--muted); }
+  label { display: block; font-size: 0.85rem; margin-bottom: 0.3rem; color: var(--muted); }
+  input[type=text] {
+    width: 100%;
+    padding: 0.5rem 0.6rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--fg);
+    font-size: 0.9rem;
+    margin-bottom: 0.75rem;
+  }
+  .row { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+  button {
+    appearance: none;
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: #fff;
+    padding: 0.55rem 1rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+  button.secondary {
+    background: transparent;
+    color: var(--accent);
+  }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  #log {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.8rem;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.75rem 0.9rem;
+    height: 220px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .status { margin: 1rem 0; padding: 0.9rem 1rem; border-radius: 10px; border: 1px solid var(--border); }
+  .status.ok { border-color: var(--ok); }
+  .status.err { border-color: var(--err); color: var(--err); }
+  .status h2 { margin: 0 0 0.4rem; font-size: 1rem; }
+  .status a { color: var(--accent); }
+  .user-code {
+    font-size: 1.6rem;
+    letter-spacing: 0.15em;
+    font-weight: 700;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .muted { color: var(--muted); font-size: 0.8rem; }
+  .pill {
+    display: inline-block;
+    font-size: 0.72rem;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    margin-left: 0.4rem;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>GitHub Device Flow - Test Page</h1>
+  <p class="lede">
+    Vanilla HTML/JS client for the <code>dash-xd/github-device-auth</code>
+    router. Runs the full device flow over the
+    <code>/auth/github/device?full&amp;cache</code> SSE endpoint, waits for
+    the resulting token to land in the tenant-scoped GCS cache bucket
+    (see <code>internal/tenantstorage</code>), then calls
+    <code>/auth/github/token</code> to read it back.
+  </p>
+
+  <fieldset>
+    <legend>Deployment</legend>
+    <label for="baseUrl">Base URL of the deployed function (or local <code>gospace-minimal</code> server)</label>
+    <input id="baseUrl" type="text" placeholder="http://127.0.0.1:8080" value="">
+    <div class="row">
+      <button id="startBtn">Start device flow (cache token)</button>
+      <button id="tokenBtn" class="secondary">Fetch cached token</button>
+    </div>
+    <p class="muted">
+      <code>EventSource</code> can't send POST bodies/headers, and the SSE
+      endpoint here is a POST route, so this page streams the response with
+      <code>fetch()</code> and parses <code>event:</code>/<code>data:</code>
+      frames itself instead - see <code>startDeviceFlow()</code> below.
+    </p>
+  </fieldset>
+
+  <div id="deviceStatus" class="status" hidden>
+    <h2>1. Enter this code on GitHub<span id="devicePill" class="pill"></span></h2>
+    <div class="user-code" id="userCode">------</div>
+    <p><a id="verificationLink" href="#" target="_blank" rel="noopener"></a></p>
+    <p class="muted" id="deviceMeta"></p>
+  </div>
+
+  <div id="cacheStatus" class="status" hidden>
+    <h2>2. Token cached<span class="pill">gs://</span></h2>
+    <p id="cacheDetail"></p>
+  </div>
+
+  <div id="tokenStatus" class="status" hidden>
+    <h2>3. Cached access token</h2>
+    <p class="muted">Never the refresh token - only what <code>/auth/github/token</code> returns.</p>
+    <pre id="tokenDetail" style="white-space: pre-wrap; word-break: break-all;"></pre>
+  </div>
+
+  <div id="errorStatus" class="status err" hidden>
+    <h2>Error</h2>
+    <p id="errorDetail"></p>
+  </div>
+
+  <fieldset>
+    <legend>Event log</legend>
+    <div id="log"></div>
+  </fieldset>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  const $ = (id) => document.getElementById(id);
+  const baseUrlInput = $("baseUrl");
+  const startBtn = $("startBtn");
+  const tokenBtn = $("tokenBtn");
+  const logEl = $("log");
+
+  // This page is served by the router itself at GET /device-flow-test,
+  // so the common case - testing the very deployment serving it - needs
+  // no base URL typed in at all. http:// and https:// are the only
+  // origins worth defaulting to; opened straight off disk (file://) or
+  // some other scheme, leave the field blank for local gospace-minimal
+  // testing instead.
+  if (location.protocol === "http:" || location.protocol === "https:") {
+    baseUrlInput.value = location.origin;
+  }
+
+  function log(line) {
+    const ts = new Date().toISOString().split("T")[1].replace("Z", "");
+    logEl.textContent += `[${ts}] ${line}\n`;
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function show(id, on) {
+    const el = $(id);
+    el.hidden = !on;
+    return el;
+  }
+
+  function showError(message) {
+    show("errorStatus", true);
+    $("errorDetail").textContent = message;
+    log(`error: ${message}`);
+  }
+
+  function resetPanels() {
+    ["deviceStatus", "cacheStatus", "tokenStatus", "errorStatus"].forEach((id) => show(id, false));
+  }
+
+  function baseUrl() {
+    return baseUrlInput.value.replace(/\/+$/, "");
+  }
+
+  // Parses one or more "event: name\ndata: {...}\n\n" frames out of an
+  // SSE byte stream. GitHub's device flow never sends multi-line data
+  // payloads (writeSSEEvent in router/sse.go always JSON-encodes to a
+  // single line), so a straightforward split on blank lines is enough -
+  // no need for a general-purpose EventSource-compatible parser here.
+  function parseSSEFrames(buffer) {
+    const frames = buffer.split("\n\n");
+    const trailing = frames.pop(); // last chunk may be incomplete
+    const parsed = [];
+
+    for (const frame of frames) {
+      let event = "message";
+      let data = "";
+
+      for (const line of frame.split("\n")) {
+        if (line.startsWith("event:")) {
+          event = line.slice(6).trim();
+        } else if (line.startsWith("data:")) {
+          data = line.slice(5).trim();
+        }
+        // ": keepalive" comment lines (see sseKeepAliveInterval in
+        // router/device_full.go) match neither prefix and are ignored.
+      }
+
+      if (data !== "") {
+        parsed.push({ event, data });
+      }
+    }
+
+    return { events: parsed, remainder: trailing };
+  }
+
+  async function startDeviceFlow() {
+    resetPanels();
+    startBtn.disabled = true;
+    logEl.textContent = "";
+
+    try {
+      const resp = await fetch(`${baseUrl()}/auth/github/device?full&cache`, { method: "POST" });
+
+      if (!resp.ok || !resp.body) {
+        showError(`device flow request failed: HTTP ${resp.status}`);
+        return;
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const { events, remainder } = parseSSEFrames(buffer);
+        buffer = remainder;
+
+        for (const { event, data } of events) {
+          handleEvent(event, data);
+        }
+      }
+
+      log("stream closed");
+    } catch (err) {
+      showError(String(err));
+    } finally {
+      startBtn.disabled = false;
+    }
+  }
+
+  function handleEvent(event, data) {
+    log(`event: ${event} data: ${data}`);
+    const payload = JSON.parse(data);
+
+    switch (event) {
+      case "device_code": {
+        const panel = show("deviceStatus", true);
+        panel.className = "status ok";
+        $("userCode").textContent = payload.user_code;
+        const link = $("verificationLink");
+        const href = payload.verification_uri_complete || payload.verification_uri;
+        link.href = href;
+        link.textContent = href;
+        $("deviceMeta").textContent =
+          `expires in ${payload.expires_in}s, polling every ${payload.interval}s - waiting for you to authorize...`;
+        break;
+      }
+
+      case "cached": {
+        const panel = show("cacheStatus", true);
+        panel.className = "status ok";
+        $("cacheDetail").innerHTML =
+          `Written to <code>gs://${payload.bucket}/${payload.object}</code>. ` +
+          `Fetching it back via <code>/auth/github/token</code>...`;
+        fetchCachedToken();
+        break;
+      }
+
+      case "token": {
+        // Only reachable if the flow was started without ?cache - the
+        // full uncached token is streamed back directly instead.
+        renderToken(payload);
+        break;
+      }
+
+      case "error": {
+        showError(payload.message || "unknown error");
+        break;
+      }
+
+      default:
+        log(`(unhandled event type: ${event})`);
+    }
+  }
+
+  function renderToken(token) {
+    const panel = show("tokenStatus", true);
+    panel.className = "status ok";
+    $("tokenDetail").textContent = JSON.stringify(token, null, 2);
+  }
+
+  async function fetchCachedToken() {
+    try {
+      const resp = await fetch(`${baseUrl()}/auth/github/token`, { method: "POST" });
+      const body = await resp.json().catch(() => null);
+
+      if (!resp.ok) {
+        showError(`GET token failed: HTTP ${resp.status} ${body ? JSON.stringify(body) : ""}`);
+        return;
+      }
+
+      renderToken(body);
+    } catch (err) {
+      showError(String(err));
+    }
+  }
+
+  startBtn.addEventListener("click", startDeviceFlow);
+  tokenBtn.addEventListener("click", () => {
+    resetPanels();
+    logEl.textContent = "";
+    fetchCachedToken();
+  });
+})();
+</script>
+</body>
+</html>

@@ -113,7 +113,8 @@ func TestHandleToken_BucketNotConfigured(t *testing.T) {
 // environment (same caveat as the write-side cache tests).
 func TestHandleToken_CacheReadFailureSurfacesAsBadGateway(t *testing.T) {
 	t.Setenv("GITHUB_CLIENT_ID", "test-client-id")
-	t.Setenv("GITHUB_TOKEN_CACHE_BUCKET", "does-not-exist-test-bucket")
+	t.Setenv("TENANT_ID", "does-not-exist-test-tenant")
+	t.Setenv("REGION", "us-central1")
 
 	srv := httptest.NewServer(NewRouter())
 	t.Cleanup(srv.Close)
