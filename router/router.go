@@ -22,5 +22,7 @@ func NewRouter() *chi.Mux {
 	r.Post("/auth/github/refresh", handleRefresh)
 	r.Post("/auth/github/token", handleToken)
 
+	r.Get("/device-flow-test", handleDeviceFlowTestPage)
+
 	return r
 }
