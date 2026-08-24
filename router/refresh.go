@@ -113,7 +113,7 @@ func handleRefresh(w http.ResponseWriter, r *http.Request) {
 func refreshErrorResponse(err error) (status int, message string) {
 	switch {
 	case errors.Is(err, ghdeviceflow.ErrInvalidRefreshToken):
-		return http.StatusUnauthorized, "GitHub refresh token is invalid or expired"
+		return http.StatusUnauthorized, "GitHub refresh token is invalid or expired; run the device flow again"
 
 	case errors.Is(err, ghdeviceflow.ErrIncorrectClientCredentials):
 		return http.StatusUnauthorized, "GitHub refresh token requires client credentials this request did not provide"

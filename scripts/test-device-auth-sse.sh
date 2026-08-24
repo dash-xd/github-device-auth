@@ -21,6 +21,7 @@ PROJECT_ID=""
 SERVICE_NAME="github-device-auth-router"
 REGION="us-central1"
 USE_CACHE=false
+FORCE_REFRESH=false
 SHOW_TOKENS=false
 IMPERSONATE_SERVICE_ACCOUNT="${IDENTITY_TOKEN_IMPERSONATE_SERVICE_ACCOUNT:-}"
 
@@ -44,6 +45,7 @@ log_error() { log "ERROR" "$@"; }
 usage() {
     cat <<EOF
 Usage: $SCRIPT_NAME auth [options]
+       $SCRIPT_NAME token [options]
 
 Runs the full GitHub device flow over the SSE endpoint
 (POST /auth/github/device?full) in one round trip: the service requests
@@ -60,12 +62,27 @@ arrives and then just waits on the stream for the final outcome.
       script then makes one follow-up call to /auth/github/token to read
       it back, proving the cache round trip (see internal/tenantstorage).
 
+  $SCRIPT_NAME token
+      Skip the device flow entirely and just call POST /auth/github/token,
+      exercising RequireValidCachedToken's expiry-check/refresh/reauth-required
+      logic against whatever token is already cached (see
+      router/tokenmiddleware.go). Useful for testing that middleware in
+      isolation, e.g. after letting a previously cached token expire.
+
+  $SCRIPT_NAME token --force-refresh
+      Same, but force a refresh even if the cached access token (and
+      refresh token) are still valid, by adding &force_refresh to the
+      request - useful for exercising the refresh path on demand instead
+      of waiting for a token to actually expire. Still fails with
+      reauth-required if the refresh token itself has expired.
+
 Options:
   --project-id <id>       GCP project ID.
                            (default: \`gcloud config get-value project\`)
   --service-name <name>   Cloud Run service name. (default: $SERVICE_NAME)
   --region <region>       GCP region of the Cloud Run service. (default: $REGION)
   --cache                 Add &cache to the request - see above.
+  --force-refresh         Add &force_refresh to the 'token' request - see above.
   --impersonate-service-account <email>
                            Pass --impersonate-service-account to every
                            \`gcloud auth print-identity-token\` call. Needed
@@ -83,6 +100,8 @@ Examples:
   $SCRIPT_NAME auth --project-id my-proj
   $SCRIPT_NAME auth --cache --service-name my-router
   $SCRIPT_NAME auth --impersonate-service-account terraform@my-proj.iam.gserviceaccount.com
+  $SCRIPT_NAME token --project-id my-proj
+  $SCRIPT_NAME token --force-refresh
 EOF
 }
 
@@ -99,7 +118,7 @@ COMMAND="$1"
 shift
 
 case "$COMMAND" in
-    auth)
+    auth|token)
         ;;
     -h|--help)
         usage
@@ -130,6 +149,10 @@ while [[ $# -gt 0 ]]; do
             USE_CACHE=true
             shift
             ;;
+        --force-refresh)
+            FORCE_REFRESH=true
+            shift
+            ;;
         --impersonate-service-account)
             IMPERSONATE_SERVICE_ACCOUNT="${2:?--impersonate-service-account requires a value}"
             shift 2
@@ -149,6 +172,16 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+if [[ "$COMMAND" == "token" && "$USE_CACHE" == true ]]; then
+    log_warn "--cache has no effect on 'token' (there is no device flow to tell to cache); ignoring it."
+    USE_CACHE=false
+fi
+
+if [[ "$COMMAND" == "auth" && "$FORCE_REFRESH" == true ]]; then
+    log_warn "--force-refresh has no effect on 'auth' (there is no cached token yet to force-refresh); ignoring it."
+    FORCE_REFRESH=false
+fi
 
 # ---------------------------------------------------------------------------
 # Preflight
@@ -429,6 +462,46 @@ dispatch_sse_event() {
 # Flow
 # ---------------------------------------------------------------------------
 
+# token_only_flow calls POST /auth/github/token directly, without running
+# a device flow first, to exercise RequireValidCachedToken's expiry-check/
+# refresh/reauth-required state machine against whatever is already cached.
+token_only_flow() {
+    local path="/auth/github/token"
+    if [[ "$FORCE_REFRESH" == true ]]; then
+        path="${path}?force_refresh"
+    fi
+
+    log_info "Checking the cached GitHub token via ${path}..."
+    echo
+
+    if ! api_call POST "$path"; then
+        case "$API_STATUS" in
+            404)
+                log_error "No cached token found. Run '$SCRIPT_NAME auth --cache' first."
+                ;;
+            401)
+                log_error "The cached refresh token is expired. Run '$SCRIPT_NAME auth --cache' again."
+                ;;
+            *)
+                # api_call already logged the status and response body above.
+                ;;
+        esac
+        exit 1
+    fi
+
+    ACCESS_TOKEN="$(jq -r '.access_token // empty' <<<"$API_RESPONSE")"
+
+    if [[ -z "$ACCESS_TOKEN" ]]; then
+        log_error "No access_token in /auth/github/token response."
+        exit 1
+    fi
+
+    log_info "Cached GitHub token is valid (refreshed transparently if it needed to be)."
+    echo
+    print_token_status "Access token" "$ACCESS_TOKEN"
+    emit_output "access-token" "$ACCESS_TOKEN"
+}
+
 sse_device_flow() {
     local token query event="" data=""
 
@@ -484,6 +557,13 @@ sse_device_flow() {
     fi
 }
 
-sse_device_flow
+case "$COMMAND" in
+    auth)
+        sse_device_flow
+        ;;
+    token)
+        token_only_flow
+        ;;
+esac
 
 log_info "Done."

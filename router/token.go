@@ -4,96 +4,52 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"os"
 	"time"
-
-	"cloud.google.com/go/storage"
 
 	"github.com/dash-xd/github-device-auth/internal/ghdeviceflow"
 )
 
-// handleToken serves the current cached GitHub access token, refreshing
-// it first if it's expired but the cached refresh token isn't. Unlike
-// handleRefresh, this takes no request body and never fails a genuine
-// double-refresh race back to the caller: the goal here is "hand me a
-// usable access token," and if a concurrent caller already refreshed it
-// for us, that goal is already met.
+// handleToken serves the current cached GitHub access token.
+// RequireValidCachedToken (see router/tokenmiddleware.go) has already
+// guaranteed a currently-valid token is available by the time this
+// runs - refreshing it first if it was expired but the cached refresh
+// token wasn't - so there is nothing left for this handler to do but
+// return it.
 func handleToken(w http.ResponseWriter, r *http.Request) {
-	clientID := os.Getenv("GITHUB_CLIENT_ID")
-
-	if clientID == "" {
+	cached, ok := cachedTokenFromContext(r.Context())
+	if !ok {
+		// Unreachable in practice: RequireValidCachedToken never calls
+		// next without first placing a valid token in the context, or
+		// else it writes a failure response itself and returns before
+		// reaching next at all. Guarded anyway rather than assumed, so
+		// a future routing mistake (this handler mounted without the
+		// middleware) fails loudly instead of panicking on a zero
+		// value.
 		http.Error(
 			w,
-			"GitHub client ID is not configured",
+			"no valid cached GitHub token available",
 			http.StatusInternalServerError,
 		)
 		return
 	}
 
-	bucket, err := resolveCacheBucket(r.Context())
-	if err != nil {
-		http.Error(
-			w,
-			"token cache bucket is not configured: "+err.Error(),
-			http.StatusInternalServerError,
-		)
-		return
-	}
-
-	// GITHUB_CLIENT_SECRET is optional: refresh tokens issued via the
-	// device flow belong to a public client and refresh without one.
-	clientSecret := os.Getenv("GITHUB_CLIENT_SECRET")
-
-	key := cacheObjectKey(clientID)
-
-	ctx, cancel := context.WithTimeout(
-		r.Context(),
-		15*time.Second,
-	)
-	defer cancel()
-
-	cached, err := loadCachedToken(ctx, bucket, key)
-	if err != nil {
-		if errors.Is(err, storage.ErrObjectNotExist) {
-			http.Error(
-				w,
-				"no cached GitHub token found; run the device flow first",
-				http.StatusNotFound,
-			)
-			return
-		}
-
-		http.Error(
-			w,
-			"failed to read cached GitHub token",
-			http.StatusBadGateway,
-		)
-		return
-	}
-
-	switch decideTokenAction(cached, time.Now()) {
-	case actionServeCached:
-		writeJSON(w, http.StatusOK, cached.publicResponse())
-
-	case actionReauthRequired:
-		http.Error(
-			w,
-			"cached GitHub refresh token is expired; run the device flow again",
-			http.StatusUnauthorized,
-		)
-
-	case actionRefresh:
-		refreshAndServe(ctx, w, clientID, clientSecret, bucket, key, cached)
-	}
+	writeJSON(w, http.StatusOK, cached.publicResponse())
 }
 
-func refreshAndServe(
+// ensureFreshToken refreshes cached's access token using its stored
+// refresh token, updates the cache with the result, and returns the
+// refreshed token. On any failure - the refresh request itself, or
+// writing the new value back to the cache - it writes the appropriate
+// error response to w itself and returns ok=false; the caller must
+// return immediately without writing anything else, the same contract
+// parseCacheRequest uses elsewhere in this package.
+func ensureFreshToken(
 	ctx context.Context,
 	w http.ResponseWriter,
 	clientID, clientSecret, bucket, key string,
 	cached cachedToken,
-) {
-	refreshed, err := ghdeviceflow.RefreshAccessToken(
+) (refreshed cachedToken, ok bool) {
+	token, err := ghdeviceflow.RefreshAccessToken(
 		ctx,
 		clientID,
 		clientSecret,
@@ -114,17 +70,16 @@ func refreshAndServe(
 			if retry, retryErr := loadCachedToken(ctx, bucket, key); retryErr == nil &&
 				retry.RefreshToken != cached.RefreshToken &&
 				retry.AccessTokenValid(time.Now(), accessTokenRefreshBuffer) {
-				writeJSON(w, http.StatusOK, retry.publicResponse())
-				return
+				return retry, true
 			}
 		}
 
 		status, message := refreshErrorResponse(err)
 		http.Error(w, message, status)
-		return
+		return cachedToken{}, false
 	}
 
-	newCached := newCachedToken(refreshed, time.Now())
+	newCached := newCachedToken(token, time.Now())
 
 	if err := storeCachedToken(ctx, bucket, key, newCached); err != nil {
 		http.Error(
@@ -132,8 +87,8 @@ func refreshAndServe(
 			"refreshed the GitHub token but failed to update the cache",
 			http.StatusBadGateway,
 		)
-		return
+		return cachedToken{}, false
 	}
 
-	writeJSON(w, http.StatusOK, newCached.publicResponse())
+	return newCached, true
 }
