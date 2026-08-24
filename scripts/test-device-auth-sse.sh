@@ -44,6 +44,7 @@ log_error() { log "ERROR" "$@"; }
 usage() {
     cat <<EOF
 Usage: $SCRIPT_NAME auth [options]
+       $SCRIPT_NAME token [options]
 
 Runs the full GitHub device flow over the SSE endpoint
 (POST /auth/github/device?full) in one round trip: the service requests
@@ -59,6 +60,13 @@ arrives and then just waits on the stream for the final outcome.
       tenant-scoped bucket instead of streaming it back directly - this
       script then makes one follow-up call to /auth/github/token to read
       it back, proving the cache round trip (see internal/tenantstorage).
+
+  $SCRIPT_NAME token
+      Skip the device flow entirely and just call POST /auth/github/token,
+      exercising RequireValidCachedToken's expiry-check/refresh/reauth-required
+      logic against whatever token is already cached (see
+      router/tokenmiddleware.go). Useful for testing that middleware in
+      isolation, e.g. after letting a previously cached token expire.
 
 Options:
   --project-id <id>       GCP project ID.
@@ -83,6 +91,7 @@ Examples:
   $SCRIPT_NAME auth --project-id my-proj
   $SCRIPT_NAME auth --cache --service-name my-router
   $SCRIPT_NAME auth --impersonate-service-account terraform@my-proj.iam.gserviceaccount.com
+  $SCRIPT_NAME token --project-id my-proj
 EOF
 }
 
@@ -99,7 +108,7 @@ COMMAND="$1"
 shift
 
 case "$COMMAND" in
-    auth)
+    auth|token)
         ;;
     -h|--help)
         usage
@@ -149,6 +158,11 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+if [[ "$COMMAND" == "token" && "$USE_CACHE" == true ]]; then
+    log_warn "--cache has no effect on 'token' (there is no device flow to tell to cache); ignoring it."
+    USE_CACHE=false
+fi
 
 # ---------------------------------------------------------------------------
 # Preflight
@@ -429,6 +443,41 @@ dispatch_sse_event() {
 # Flow
 # ---------------------------------------------------------------------------
 
+# token_only_flow calls POST /auth/github/token directly, without running
+# a device flow first, to exercise RequireValidCachedToken's expiry-check/
+# refresh/reauth-required state machine against whatever is already cached.
+token_only_flow() {
+    log_info "Checking the cached GitHub token via /auth/github/token..."
+    echo
+
+    if ! api_call POST /auth/github/token; then
+        case "$API_STATUS" in
+            404)
+                log_error "No cached token found. Run '$SCRIPT_NAME auth --cache' first."
+                ;;
+            401)
+                log_error "The cached refresh token is expired. Run '$SCRIPT_NAME auth --cache' again."
+                ;;
+            *)
+                # api_call already logged the status and response body above.
+                ;;
+        esac
+        exit 1
+    fi
+
+    ACCESS_TOKEN="$(jq -r '.access_token // empty' <<<"$API_RESPONSE")"
+
+    if [[ -z "$ACCESS_TOKEN" ]]; then
+        log_error "No access_token in /auth/github/token response."
+        exit 1
+    fi
+
+    log_info "Cached GitHub token is valid (refreshed transparently if it needed to be)."
+    echo
+    print_token_status "Access token" "$ACCESS_TOKEN"
+    emit_output "access-token" "$ACCESS_TOKEN"
+}
+
 sse_device_flow() {
     local token query event="" data=""
 
@@ -484,6 +533,13 @@ sse_device_flow() {
     fi
 }
 
-sse_device_flow
+case "$COMMAND" in
+    auth)
+        sse_device_flow
+        ;;
+    token)
+        token_only_flow
+        ;;
+esac
 
 log_info "Done."
