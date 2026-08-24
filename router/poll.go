@@ -100,6 +100,13 @@ func pollErrorResponse(err error) (status int, message string) {
 		return http.StatusRequestTimeout, "request canceled"
 
 	default:
-		return http.StatusBadGateway, "GitHub authentication failed"
+		// PollForToken's own default case already wraps GitHub's error
+		// and error_description into err's text (e.g. "github
+		// authentication failed: incorrect_client_credentials: ...") -
+		// surface that instead of a fixed string, so a caller can tell
+		// *why* GitHub rejected the poll (wrong client_id/secret,
+		// Device Flow not enabled on the app, etc.) instead of hitting
+		// a dead end.
+		return http.StatusBadGateway, err.Error()
 	}
 }
