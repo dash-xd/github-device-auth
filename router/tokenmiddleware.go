@@ -39,6 +39,11 @@ func withCachedToken(r *http.Request, token cachedToken) *http.Request {
 //     expired, or the refresh attempt fails, the wrapped handler is
 //     never invoked - this writes the failure response itself and tells
 //     the caller to rerun the device flow where that's the actual fix.
+//   - A request with a bare ?force_refresh query parameter forces the
+//     refresh branch even when the cached access token is still valid -
+//     useful for testing the refresh path on demand. It still can't
+//     override a genuinely expired refresh token: that's still
+//     reauth-required regardless.
 //
 // This is the same expiry-check-then-refresh state machine
 // /auth/github/token has always run, pulled out so any future route
@@ -100,7 +105,9 @@ func RequireValidCachedToken(next http.Handler) http.Handler {
 			return
 		}
 
-		switch decideTokenAction(cached, time.Now()) {
+		forceRefresh := r.URL.Query().Has("force_refresh")
+
+		switch decideTokenAction(cached, time.Now(), forceRefresh) {
 		case actionServeCached:
 			next.ServeHTTP(w, withCachedToken(r, cached))
 

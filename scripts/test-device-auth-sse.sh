@@ -21,6 +21,7 @@ PROJECT_ID=""
 SERVICE_NAME="github-device-auth-router"
 REGION="us-central1"
 USE_CACHE=false
+FORCE_REFRESH=false
 SHOW_TOKENS=false
 IMPERSONATE_SERVICE_ACCOUNT="${IDENTITY_TOKEN_IMPERSONATE_SERVICE_ACCOUNT:-}"
 
@@ -68,12 +69,20 @@ arrives and then just waits on the stream for the final outcome.
       router/tokenmiddleware.go). Useful for testing that middleware in
       isolation, e.g. after letting a previously cached token expire.
 
+  $SCRIPT_NAME token --force-refresh
+      Same, but force a refresh even if the cached access token (and
+      refresh token) are still valid, by adding &force_refresh to the
+      request - useful for exercising the refresh path on demand instead
+      of waiting for a token to actually expire. Still fails with
+      reauth-required if the refresh token itself has expired.
+
 Options:
   --project-id <id>       GCP project ID.
                            (default: \`gcloud config get-value project\`)
   --service-name <name>   Cloud Run service name. (default: $SERVICE_NAME)
   --region <region>       GCP region of the Cloud Run service. (default: $REGION)
   --cache                 Add &cache to the request - see above.
+  --force-refresh         Add &force_refresh to the 'token' request - see above.
   --impersonate-service-account <email>
                            Pass --impersonate-service-account to every
                            \`gcloud auth print-identity-token\` call. Needed
@@ -92,6 +101,7 @@ Examples:
   $SCRIPT_NAME auth --cache --service-name my-router
   $SCRIPT_NAME auth --impersonate-service-account terraform@my-proj.iam.gserviceaccount.com
   $SCRIPT_NAME token --project-id my-proj
+  $SCRIPT_NAME token --force-refresh
 EOF
 }
 
@@ -139,6 +149,10 @@ while [[ $# -gt 0 ]]; do
             USE_CACHE=true
             shift
             ;;
+        --force-refresh)
+            FORCE_REFRESH=true
+            shift
+            ;;
         --impersonate-service-account)
             IMPERSONATE_SERVICE_ACCOUNT="${2:?--impersonate-service-account requires a value}"
             shift 2
@@ -162,6 +176,11 @@ done
 if [[ "$COMMAND" == "token" && "$USE_CACHE" == true ]]; then
     log_warn "--cache has no effect on 'token' (there is no device flow to tell to cache); ignoring it."
     USE_CACHE=false
+fi
+
+if [[ "$COMMAND" == "auth" && "$FORCE_REFRESH" == true ]]; then
+    log_warn "--force-refresh has no effect on 'auth' (there is no cached token yet to force-refresh); ignoring it."
+    FORCE_REFRESH=false
 fi
 
 # ---------------------------------------------------------------------------
@@ -447,10 +466,15 @@ dispatch_sse_event() {
 # a device flow first, to exercise RequireValidCachedToken's expiry-check/
 # refresh/reauth-required state machine against whatever is already cached.
 token_only_flow() {
-    log_info "Checking the cached GitHub token via /auth/github/token..."
+    local path="/auth/github/token"
+    if [[ "$FORCE_REFRESH" == true ]]; then
+        path="${path}?force_refresh"
+    fi
+
+    log_info "Checking the cached GitHub token via ${path}..."
     echo
 
-    if ! api_call POST /auth/github/token; then
+    if ! api_call POST "$path"; then
         case "$API_STATUS" in
             404)
                 log_error "No cached token found. Run '$SCRIPT_NAME auth --cache' first."

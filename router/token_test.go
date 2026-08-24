@@ -12,9 +12,10 @@ func TestDecideTokenAction(t *testing.T) {
 	buffer := accessTokenRefreshBuffer
 
 	tests := []struct {
-		name   string
-		cached cachedToken
-		want   tokenAction
+		name         string
+		cached       cachedToken
+		forceRefresh bool
+		want         tokenAction
 	}{
 		{
 			name: "access token comfortably valid",
@@ -62,11 +63,29 @@ func TestDecideTokenAction(t *testing.T) {
 			},
 			want: actionRefresh,
 		},
+		{
+			name: "force refresh overrides a still-valid access token",
+			cached: cachedToken{
+				AccessTokenExpiresAt:  now.Add(1 * time.Hour),
+				RefreshTokenExpiresAt: now.Add(30 * 24 * time.Hour),
+			},
+			forceRefresh: true,
+			want:         actionRefresh,
+		},
+		{
+			name: "force refresh cannot override an expired refresh token",
+			cached: cachedToken{
+				AccessTokenExpiresAt:  now.Add(1 * time.Hour),
+				RefreshTokenExpiresAt: now.Add(-1 * time.Minute),
+			},
+			forceRefresh: true,
+			want:         actionReauthRequired,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := decideTokenAction(tt.cached, now)
+			got := decideTokenAction(tt.cached, now, tt.forceRefresh)
 			if got != tt.want {
 				t.Errorf("decideTokenAction() = %v, want %v", got, tt.want)
 			}

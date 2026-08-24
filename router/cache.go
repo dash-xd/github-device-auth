@@ -161,13 +161,17 @@ const (
 	actionReauthRequired
 )
 
-func decideTokenAction(cached cachedToken, now time.Time) tokenAction {
-	if cached.AccessTokenValid(now, accessTokenRefreshBuffer) {
-		return actionServeCached
-	}
-
+func decideTokenAction(cached cachedToken, now time.Time, forceRefresh bool) tokenAction {
 	if !cached.RefreshTokenValid(now) {
 		return actionReauthRequired
+	}
+
+	if forceRefresh {
+		return actionRefresh
+	}
+
+	if cached.AccessTokenValid(now, accessTokenRefreshBuffer) {
+		return actionServeCached
 	}
 
 	return actionRefresh
