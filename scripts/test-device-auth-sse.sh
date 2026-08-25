@@ -76,12 +76,20 @@ arrives and then just waits on the stream for the final outcome.
       of waiting for a token to actually expire. Still fails with
       reauth-required if the refresh token itself has expired.
 
+  $SCRIPT_NAME token --cache
+      --cache is accepted here too, but doesn't change anything:
+      RequireValidCachedToken already writes any refreshed token back to
+      the tenant-scoped cache unconditionally, on every refresh (natural
+      or forced) - there's no separate opt-in for it on this endpoint.
+
 Options:
   --project-id <id>       GCP project ID.
                            (default: \`gcloud config get-value project\`)
   --service-name <name>   Cloud Run service name. (default: $SERVICE_NAME)
   --region <region>       GCP region of the Cloud Run service. (default: $REGION)
-  --cache                 Add &cache to the request - see above.
+  --cache                 Add &cache to the 'auth' request - see above.
+                           Accepted on 'token' too, but has no effect
+                           there: refreshing always caches, flag or not.
   --force-refresh         Add &force_refresh to the 'token' request - see above.
   --impersonate-service-account <email>
                            Pass --impersonate-service-account to every
@@ -172,11 +180,6 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
-
-if [[ "$COMMAND" == "token" && "$USE_CACHE" == true ]]; then
-    log_warn "--cache has no effect on 'token' (there is no device flow to tell to cache); ignoring it."
-    USE_CACHE=false
-fi
 
 if [[ "$COMMAND" == "auth" && "$FORCE_REFRESH" == true ]]; then
     log_warn "--force-refresh has no effect on 'auth' (there is no cached token yet to force-refresh); ignoring it."
