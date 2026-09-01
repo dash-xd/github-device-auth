@@ -24,11 +24,29 @@ deployed as a GCP Cloud Function (gen 2) by
 | POST | `/auth/github/token` | - | Return the cached access token for this deployment, transparently refreshing it first if needed. Requires caching to be configured (see below). |
 | GET | `/device-flow-test` | - | Serves `router/webui/device-flow-test.html`, a standalone vanilla HTML/JS page that exercises the full flow against whatever origin it's loaded from. |
 
-`GITHUB_CLIENT_ID` must be set for every endpoint except `/auth/github/token`'s
-cache-only bucket lookup (`/auth/github/token` still needs it too, to know
-which client's cache slot to read). `GITHUB_CLIENT_SECRET` is optional -
-device-flow refresh tokens belong to a public client and refresh without
-one; only set it if you also refresh non-device-flow tokens through here.
+## GitHub client ID resolution
+
+Every route that needs a GitHub client ID resolves it with the same precedence:
+
+1. `GITHUB_CLIENT_ID` from the deployment environment, when non-empty.
+2. Otherwise the request header `X-GitHub-App-Client-ID`.
+3. If neither is present, the request fails with `GitHub client ID is not configured`.
+
+The environment variable is authoritative and **cannot be overridden** by the
+header. The header fallback exists for browser/static-client deployments where
+the GitHub App client ID is intentionally supplied per request instead of being
+baked into the router deployment. A static client using the fallback must send
+the same `X-GitHub-App-Client-ID` on the initial device request, polling calls
+when used, refresh calls, and cached-token calls when server-side caching is in
+use.
+
+The client ID is public application metadata, not a secret. Cross-origin browser
+requests are supported: CORS allows `X-GitHub-App-Client-ID` in addition to
+`Content-Type`.
+
+`GITHUB_CLIENT_SECRET` is optional - device-flow refresh tokens belong to a
+public client and refresh without one; only set it if you also refresh
+non-device-flow tokens through here.
 
 ## Trying it
 
@@ -141,7 +159,8 @@ consequences worth calling out explicitly:
 endpoint (`router/github_mock_test.go`) - no real GitHub App/network
 access needed. To serve the router locally end-to-end (e.g. to try
 `/device-flow-test` against a real GitHub App), see
-`dash-xd/gospace-minimal`'s `cmd/localserve` and `.github/actions/router`
-- point its `internal/routersource/source/source.go` at this repo's
-`router.NewRouter`, set `GITHUB_CLIENT_ID` (and `TENANT_ID`/`REGION` if
-you want to exercise caching), and run it.
+`dash-xd/gospace-minimal`'s `cmd/localserve` and `.github/actions/router`.
+Point its `internal/routersource/source/source.go` at this repo's
+`router.NewRouter`. Either set `GITHUB_CLIENT_ID`, or leave it unset and
+supply `X-GitHub-App-Client-ID` from the client. Set `TENANT_ID`/`REGION`
+only if you want to exercise server-side caching.
