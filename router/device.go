@@ -3,7 +3,6 @@ package router
 import (
 	"context"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/dash-xd/github-device-auth/internal/ghdeviceflow"
@@ -36,7 +35,7 @@ func handleDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clientID := os.Getenv("GITHUB_CLIENT_ID")
+	clientID := githubClientID(r)
 
 	if clientID == "" {
 		http.Error(
