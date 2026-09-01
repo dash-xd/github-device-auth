@@ -3,7 +3,6 @@ package router
 import (
 	"context"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/dash-xd/github-device-auth/internal/ghdeviceflow"
@@ -28,7 +27,7 @@ type pollOutcome struct {
 // requested) confirmation that it was written to the configured GCS
 // bucket instead.
 func handleDeviceFull(w http.ResponseWriter, r *http.Request) {
-	clientID := os.Getenv("GITHUB_CLIENT_ID")
+	clientID := githubClientID(r)
 
 	if clientID == "" {
 		http.Error(
