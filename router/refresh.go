@@ -16,7 +16,7 @@ type refreshRequest struct {
 }
 
 func handleRefresh(w http.ResponseWriter, r *http.Request) {
-	clientID := os.Getenv("GITHUB_CLIENT_ID")
+	clientID := githubClientID(r)
 
 	if clientID == "" {
 		http.Error(
@@ -27,51 +27,27 @@ func handleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// GITHUB_CLIENT_SECRET is optional: refresh tokens issued via the
-	// device flow belong to a public client and refresh without one.
 	clientSecret := os.Getenv("GITHUB_CLIENT_SECRET")
 
 	var request refreshRequest
-
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		http.Error(
-			w,
-			"invalid JSON request",
-			http.StatusBadRequest,
-		)
+		http.Error(w, "invalid JSON request", http.StatusBadRequest)
 		return
 	}
-
 	if request.RefreshToken == "" {
-		http.Error(
-			w,
-			"refresh_token is required",
-			http.StatusBadRequest,
-		)
+		http.Error(w, "refresh_token is required", http.StatusBadRequest)
 		return
 	}
 
-	// Validated before calling GitHub: a device-flow refresh token is
-	// single-use and rotates on every exchange, so a cache misconfiguration
-	// caught only after the exchange would mean the old refresh token is
-	// already burned and the newly issued one has nowhere to go.
 	bucket, cacheKey, cacheRequested, ok := parseCacheRequest(w, r, clientID)
 	if !ok {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(
-		r.Context(),
-		15*time.Second,
-	)
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	token, err := ghdeviceflow.RefreshAccessToken(
-		ctx,
-		clientID,
-		clientSecret,
-		request.RefreshToken,
-	)
+	token, err := ghdeviceflow.RefreshAccessToken(ctx, clientID, clientSecret, request.RefreshToken)
 	if err != nil {
 		status, message := refreshErrorResponse(err)
 		http.Error(w, message, status)
@@ -80,50 +56,26 @@ func handleRefresh(w http.ResponseWriter, r *http.Request) {
 
 	if cacheRequested {
 		if err := storeCachedToken(ctx, bucket, cacheKey, newCachedToken(token, time.Now())); err != nil {
-			http.Error(
-				w,
-				"failed to cache GitHub token",
-				http.StatusBadGateway,
-			)
+			http.Error(w, "failed to cache GitHub token", http.StatusBadGateway)
 			return
 		}
-
-		writeJSON(
-			w,
-			http.StatusOK,
-			cacheConfirmation{
-				Cached: true,
-				Bucket: bucket,
-				Object: cacheKey,
-			},
-		)
+		writeJSON(w, http.StatusOK, cacheConfirmation{Cached: true, Bucket: bucket, Object: cacheKey})
 		return
 	}
 
-	writeJSON(
-		w,
-		http.StatusOK,
-		token,
-	)
+	writeJSON(w, http.StatusOK, token)
 }
 
-// refreshErrorResponse maps a RefreshAccessToken error to the HTTP
-// status and message it should produce. Shared with handleToken's
-// auto-refresh path.
 func refreshErrorResponse(err error) (status int, message string) {
 	switch {
 	case errors.Is(err, ghdeviceflow.ErrInvalidRefreshToken):
 		return http.StatusUnauthorized, "GitHub refresh token is invalid or expired; run the device flow again"
-
 	case errors.Is(err, ghdeviceflow.ErrIncorrectClientCredentials):
 		return http.StatusUnauthorized, "GitHub refresh token requires client credentials this request did not provide"
-
 	case errors.Is(err, context.DeadlineExceeded):
 		return http.StatusGatewayTimeout, "GitHub token refresh timed out"
-
 	case errors.Is(err, context.Canceled):
 		return http.StatusRequestTimeout, "request canceled"
-
 	default:
 		return http.StatusBadGateway, "GitHub token refresh failed"
 	}
