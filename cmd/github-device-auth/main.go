@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	deviceauth "github.com/dash-xd/github-device-auth/public"
+	"github.com/dash-xd/github-device-auth/deviceauth"
 )
 
 func main() {
