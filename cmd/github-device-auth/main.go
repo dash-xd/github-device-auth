@@ -235,23 +235,40 @@ func syncSecret(ctx context.Context, args []string) error {
 		return fmt.Errorf("sync-secret requires gh CLI: %w", err)
 	}
 	set := func(name string) error {
-		cmd := exec.CommandContext(ctx, gh, "secret", "set", name, "--repo", args[1], "--app", "actions")
-		cmd.Env = append(os.Environ(), "GH_TOKEN="+bundle.AccessToken)
-		cmd.Stdin = strings.NewReader(string(data))
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		return cmd.Run()
+		var lastErr error
+		for attempt := 1; attempt <= 3; attempt++ {
+			cmd := exec.CommandContext(ctx, gh, "secret", "set", name, "--repo", args[1], "--app", "actions")
+			cmd.Env = append(os.Environ(), "GH_TOKEN="+bundle.AccessToken)
+			cmd.Stdin = strings.NewReader(string(data))
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err == nil {
+				return nil
+			} else {
+				lastErr = err
+			}
+			if attempt < 3 {
+				timer := time.NewTimer(time.Duration(attempt) * time.Second)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return ctx.Err()
+				case <-timer.C:
+				}
+			}
+		}
+		return lastErr
 	}
 	if len(args) == 4 {
 		if strings.TrimSpace(args[3]) == "" || args[3] == args[2] {
 			return fmt.Errorf("recovery secret must be non-empty and distinct from primary")
 		}
 		if err := set(args[3]); err != nil {
-			return fmt.Errorf("write recovery credential checkpoint: %w", err)
+			return fmt.Errorf("write recovery credential checkpoint after retries: %w", err)
 		}
 	}
 	if err := set(args[2]); err != nil {
-		return fmt.Errorf("write primary credential checkpoint: %w", err)
+		return fmt.Errorf("write primary credential checkpoint after retries: %w", err)
 	}
 	return nil
 }
