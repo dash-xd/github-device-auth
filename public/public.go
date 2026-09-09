@@ -1,9 +1,8 @@
-// Package public exposes the stable, reusable surface of github-device-auth.
+// Package public exposes the stable, reusable GitHub device-flow primitives.
 //
-// It is intentionally a thin facade over the repository's existing internal
-// device-flow implementation and router package. Keeping the implementation in
-// place preserves existing imports while allowing ordinary Go programs to use
-// device authorization without depending on the HTTP router.
+// It is intentionally a thin, stateless facade over the repository's existing
+// device-flow implementation. Persistence and deployment adapters such as the
+// HTTP router or GCS cache are separate concerns and must not be imported here.
 package public
 
 import (
@@ -11,8 +10,6 @@ import (
 	"time"
 
 	"github.com/dash-xd/github-device-auth/internal/ghdeviceflow"
-	"github.com/dash-xd/github-device-auth/router"
-	"github.com/go-chi/chi/v5"
 )
 
 // DeviceCodeResponse is GitHub's response to a device-code request.
@@ -45,11 +42,4 @@ func PollForToken(ctx context.Context, clientID, deviceCode string, interval tim
 // clientSecret may be empty for public-client device-flow refresh tokens.
 func RefreshAccessToken(ctx context.Context, clientID, clientSecret, refreshToken string) (*TokenResponse, error) {
 	return ghdeviceflow.RefreshAccessToken(ctx, clientID, clientSecret, refreshToken)
-}
-
-// NewRouter returns the existing HTTP router unchanged. This convenience keeps
-// the public facade complete without replacing or deprecating the historical
-// github.com/dash-xd/github-device-auth/router import path.
-func NewRouter() *chi.Mux {
-	return router.NewRouter()
 }
