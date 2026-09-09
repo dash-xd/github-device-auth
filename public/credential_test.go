@@ -61,4 +61,7 @@ func TestParseCredentialBundleRejectsUnknownAndIncompleteState(t *testing.T) {
 	if _, err := ParseCredentialBundle([]byte(valid + ` {}`)); err == nil {
 		t.Fatal("expected trailing JSON to be rejected")
 	}
+	if _, err := ParseCredentialBundle([]byte(valid + ` nope`)); err == nil {
+		t.Fatal("expected malformed trailing data to be rejected")
+	}
 }
