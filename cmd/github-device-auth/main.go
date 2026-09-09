@@ -210,14 +210,14 @@ func exportBundle(args []string) error {
 	return err
 }
 
-// syncSecret writes the complete current bundle to a recovery journal first,
-// when supplied, and only then replaces the primary repository secret. Using a
-// GitHub refresh token invalidates the old access+refresh pair immediately, so
-// the freshly rotated pair needs durable recovery material before primary
-// cutover.
+// syncSecret writes the complete current bundle to one repository Actions
+// secret. The runner-local credential file is already the atomic source of truth
+// for this invocation. If the remote write fails after refresh, leave that file
+// intact for the life of the run, fail closed, and retry synchronization from
+// the same local bundle rather than introducing a second remote checkpoint.
 func syncSecret(ctx context.Context, args []string) error {
-	if len(args) != 3 && len(args) != 4 {
-		return fmt.Errorf("usage: github-device-auth sync-secret <store> <owner/repo> <secret-name> [recovery-secret-name]")
+	if len(args) != 3 {
+		return fmt.Errorf("usage: github-device-auth sync-secret <store> <owner/repo> <secret-name>")
 	}
 	bundle, err := deviceauth.LoadCredentialBundle(args[0])
 	if err != nil {
@@ -234,43 +234,29 @@ func syncSecret(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("sync-secret requires gh CLI: %w", err)
 	}
-	set := func(name string) error {
-		var lastErr error
-		for attempt := 1; attempt <= 3; attempt++ {
-			cmd := exec.CommandContext(ctx, gh, "secret", "set", name, "--repo", args[1], "--app", "actions")
-			cmd.Env = append(os.Environ(), "GH_TOKEN="+bundle.AccessToken)
-			cmd.Stdin = strings.NewReader(string(data))
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			if err := cmd.Run(); err == nil {
-				return nil
-			} else {
-				lastErr = err
-			}
-			if attempt < 3 {
-				timer := time.NewTimer(time.Duration(attempt) * time.Second)
-				select {
-				case <-ctx.Done():
-					timer.Stop()
-					return ctx.Err()
-				case <-timer.C:
-				}
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		cmd := exec.CommandContext(ctx, gh, "secret", "set", args[2], "--repo", args[1], "--app", "actions")
+		cmd.Env = append(os.Environ(), "GH_TOKEN="+bundle.AccessToken)
+		cmd.Stdin = strings.NewReader(string(data))
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		if attempt < 3 {
+			timer := time.NewTimer(time.Duration(attempt) * time.Second)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
 			}
 		}
-		return lastErr
 	}
-	if len(args) == 4 {
-		if strings.TrimSpace(args[3]) == "" || args[3] == args[2] {
-			return fmt.Errorf("recovery secret must be non-empty and distinct from primary")
-		}
-		if err := set(args[3]); err != nil {
-			return fmt.Errorf("write recovery credential checkpoint after retries: %w", err)
-		}
-	}
-	if err := set(args[2]); err != nil {
-		return fmt.Errorf("write primary credential checkpoint after retries: %w", err)
-	}
-	return nil
+	return fmt.Errorf("write repository credential checkpoint after retries: %w", lastErr)
 }
 
 func printStatus(bundle deviceauth.CredentialBundle, fresh bool) error {
