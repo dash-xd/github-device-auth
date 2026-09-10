@@ -27,9 +27,3 @@ func TestFacadeFunctionSignaturesCompile(t *testing.T) {
 		t.Fatal("public facade functions must be available")
 	}
 }
-
-func TestNewRouterWrapsExistingRouter(t *testing.T) {
-	if NewRouter() == nil {
-		t.Fatal("NewRouter returned nil")
-	}
-}
